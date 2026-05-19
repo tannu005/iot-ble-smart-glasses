@@ -40,8 +40,11 @@ export default function App() {
   const [appSt, setAppSt] = useState({ battery: 85, charging: false, lastPhoto: null, nodCount: 0, timeSynced: false, led: 50 });
   const [log, setLog] = useState([]);
   const [stats, setStats] = useState({ sent: 0, recv: 0, errors: 0 });
+  
   const [chaos, setChaos] = useState(false);
+  const [autoSim, setAutoSim] = useState(false);
   const [ledVal, setLedVal] = useState(50);
+  
   const startTime = useRef(Date.now());
   const [uptime, setUptime] = useState('0s');
   const logRef = useRef(null);
@@ -60,17 +63,40 @@ export default function App() {
   useEffect(() => {
     const t = setInterval(() => {
       setDevice(d => ({ ...d, battery: d.charging ? Math.min(100, d.battery + 2) : Math.max(5, d.battery - 1) }));
-    }, 5000);
+    }, 8000);
     return () => clearInterval(t);
   }, []);
 
+  // Auto-Simulate Engine
+  useEffect(() => {
+    if (!autoSim) return;
+    const actions = [devicePhoto, deviceNod, deviceBattery, appCapture, appSyncTime];
+    const t = setInterval(() => {
+      if (Math.random() > 0.3) {
+        const action = actions[Math.floor(Math.random() * actions.length)];
+        action();
+      }
+    }, 3500);
+    return () => clearInterval(t);
+  }, [autoSim]);
+
   // Auto-scroll log
-  useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [log]);
+  useEffect(() => { 
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [log]);
 
   // Flash helper
   const flashState = useCallback((id) => {
     const el = document.getElementById(id);
-    if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 500); }
+    if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 600); }
+  }, []);
+  
+  // Stat pop helper
+  const popStat = useCallback((id) => {
+    const el = document.getElementById(id);
+    if (el) { el.classList.remove('up'); void el.offsetWidth; el.classList.add('up'); setTimeout(() => el.classList.remove('up'), 400); }
   }, []);
 
   // ── Transmit ────────────────────────────────────────────
@@ -97,15 +123,20 @@ export default function App() {
   // ── Device Actions ──────────────────────────────────────
   const devicePhoto = useCallback(() => {
     setDevice(d => { const n = d.photoCount + 1; return { ...d, photoCount: n }; });
+    popStat('stat-photo-val');
     const pkt = buildPacket(COMMANDS.PHOTO_CAPTURED, [(device.photoCount + 1) & 0xFF]);
     transmit('d2a', pkt, () => { setAppSt(a => ({ ...a, lastPhoto: new Date().toLocaleTimeString() })); flashState('sr-photo'); });
-  }, [device.photoCount, transmit, flashState]);
+  }, [device.photoCount, transmit, flashState, popStat]);
 
   const deviceNod = useCallback(() => {
     const nodType = Math.floor(Math.random() * 3);
     setDevice(d => ({ ...d, nodCount: d.nodCount + 1 }));
-    transmit('d2a', buildPacket(COMMANDS.NOD_DETECTED, [nodType]), () => { setAppSt(a => ({ ...a, nodCount: a.nodCount + 1 })); flashState('sr-nod'); });
-  }, [transmit, flashState]);
+    popStat('stat-nod-val');
+    transmit('d2a', buildPacket(COMMANDS.NOD_DETECTED, [nodType]), () => { 
+      setAppSt(a => ({ ...a, nodCount: a.nodCount + 1 })); 
+      flashState('sr-nod'); 
+    });
+  }, [transmit, flashState, popStat]);
 
   const deviceBattery = useCallback(() => {
     transmit('d2a', buildPacket(COMMANDS.BATTERY_LEVEL, [device.battery]), () => { setAppSt(a => ({ ...a, battery: device.battery })); flashState('sr-bat'); });
@@ -122,13 +153,14 @@ export default function App() {
     const val = Math.max(0, Math.min(100, v));
     transmit('a2d', buildPacket(COMMANDS.SET_LED, [val]), () => {
       setDevice(d => ({ ...d, ledBrightness: val }));
+      popStat('stat-led-val');
       setAppSt(a => ({ ...a, led: val }));
-      setTimeout(() => transmit('d2a', buildPacket(COMMANDS.ACK, [COMMANDS.SET_LED])), 120);
+      setTimeout(() => transmit('d2a', buildPacket(COMMANDS.ACK, [COMMANDS.SET_LED])), 150);
     });
-  }, [transmit]);
+  }, [transmit, popStat]);
 
   const appCapture = useCallback(() => {
-    transmit('a2d', buildPacket(COMMANDS.TRIGGER_PHOTO, []), () => { setTimeout(() => devicePhoto(), 350); });
+    transmit('a2d', buildPacket(COMMANDS.TRIGGER_PHOTO, []), () => { setTimeout(() => devicePhoto(), 450); });
   }, [transmit, devicePhoto]);
 
   const appSyncTime = useCallback(() => {
@@ -136,12 +168,22 @@ export default function App() {
     const pl = [epoch & 0xFF, (epoch >> 8) & 0xFF, (epoch >> 16) & 0xFF, (epoch >> 24) & 0xFF];
     transmit('a2d', buildPacket(COMMANDS.SYNC_TIME, pl), () => {
       setAppSt(a => ({ ...a, timeSynced: true })); flashState('sr-sync');
-      setTimeout(() => transmit('d2a', buildPacket(COMMANDS.ACK, [COMMANDS.SYNC_TIME])), 100);
+      setTimeout(() => transmit('d2a', buildPacket(COMMANDS.ACK, [COMMANDS.SYNC_TIME])), 120);
     });
   }, [transmit, flashState]);
 
   // ── Button ripple helper ────────────────────────────────
-  const ripple = (e) => { const el = e.currentTarget; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); };
+  const ripple = (e) => { 
+    const el = e.currentTarget; 
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    el.style.setProperty('--mx', `${x}px`);
+    el.style.setProperty('--my', `${y}px`);
+    el.classList.remove('pop'); 
+    void el.offsetWidth; 
+    el.classList.add('pop'); 
+  };
 
   return (
     <div className="simulator-root">
@@ -149,14 +191,22 @@ export default function App() {
       <header className="header">
         <div className="header-left">
           <div className="logo-icon">
-            <svg viewBox="0 0 32 32" width="26" height="26" fill="none"><rect x="2" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><rect x="20" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M12 14h8" stroke="currentColor" strokeWidth="2"/><circle cx="7" cy="14" r="2" fill="currentColor"/><circle cx="25" cy="14" r="2" fill="currentColor"/></svg>
+            <svg viewBox="0 0 32 32" width="22" height="22" fill="none"><rect x="2" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><rect x="20" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M12 14h8" stroke="currentColor" strokeWidth="2"/><circle cx="7" cy="14" r="2" fill="currentColor"/><circle cx="25" cy="14" r="2" fill="currentColor"/></svg>
           </div>
           <div className="header-title"><h1>BLE Smart Glasses</h1><span className="subtitle">Live Device Simulator</span></div>
         </div>
-        <div className="header-center"><div className="conn-badge"><span className="pulse-dot" /><span className="conn-text">Connected</span></div></div>
+        
+        <div className="header-center">
+          <button className={`auto-sim-btn${autoSim ? ' active' : ''}`} onClick={() => setAutoSim(a => !a)} style={{marginRight: 16}} title="Generate random traffic">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            Auto
+          </button>
+          <div className="conn-badge"><span className="pulse-dot" /><span className="conn-text">Connected</span></div>
+        </div>
+        
         <div className="header-right">
-          <button className={`chaos-btn${chaos ? ' active' : ''}`} onClick={() => setChaos(c => !c)}>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          <button className={`chaos-btn${chaos ? ' active' : ''}`} onClick={() => setChaos(c => !c)} title="Corrupt 10% of packets randomly">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
             Chaos
           </button>
           {chaos && <span className="chaos-badge">10 % corrupt</span>}
@@ -167,29 +217,33 @@ export default function App() {
       <main className="main-grid">
 
         {/* ── Device Panel ── */}
-        <section className="panel">
+        <section className="panel device-panel">
           <div className="panel-hdr"><div className="p-icon device">🕶️</div><h2>Smart Glasses</h2><span className="p-badge device">DEVICE</span></div>
           <div className="panel-body">
+            
             <div className="battery-display">
               <div className="battery-shell">
                 <div className={`battery-fill ${device.battery <= 20 ? 'low' : 'ok'} ${device.charging ? 'charging' : ''}`} style={{ width: `${device.battery}%` }} />
                 <div className="battery-tip" />
               </div>
-              <div className="battery-info"><span className="battery-pct">{device.battery}%</span><span className="battery-lbl">{device.charging ? '⚡ Charging' : 'Discharging'}</span></div>
+              <div className="battery-info">
+                <span className="battery-pct">{device.battery}%</span>
+                <span className="battery-lbl">{device.charging ? '⚡ Charging' : 'Discharging'}</span>
+              </div>
             </div>
 
-            <div className="action-group">
-              <div className="group-label">Send Events</div>
-              <button className="action-btn" onClick={(e) => { ripple(e); devicePhoto(); }}><span className="btn-icon">📷</span> Photo Taken</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); deviceNod(); }}><span className="btn-icon">🤝</span> Head Nod</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); deviceBattery(); }}><span className="btn-icon">🔋</span> Battery Report</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); deviceCharge(); }}><span className="btn-icon">⚡</span> Toggle Charging</button>
+            <div className="action-group" style={{marginTop: 4}}>
+              <div className="group-label">Sensors & Events</div>
+              <button className="action-btn" onClick={(e) => { ripple(e); devicePhoto(); }}><span className="btn-icon">📷</span> Capture Photo</button>
+              <button className="action-btn" onClick={(e) => { ripple(e); deviceNod(); }}><span className="btn-icon">🤝</span> Detect Head Nod</button>
+              <button className="action-btn" onClick={(e) => { ripple(e); deviceBattery(); }}><span className="btn-icon">🔋</span> Send Battery Status</button>
+              <button className="action-btn" onClick={(e) => { ripple(e); deviceCharge(); }}><span className="btn-icon">⚡</span> Toggle Charging State</button>
             </div>
 
-            <div className="stats-grid">
-              <div className="stat-card"><span className="stat-val">{device.photoCount}</span><span className="stat-lbl">Photos</span></div>
-              <div className="stat-card"><span className="stat-val">{device.nodCount}</span><span className="stat-lbl">Nods</span></div>
-              <div className="stat-card"><span className="stat-val">{device.ledBrightness}%</span><span className="stat-lbl">LED</span></div>
+            <div className="stats-grid" style={{marginTop: 'auto'}}>
+              <div className="stat-card"><span className="stat-val" id="stat-photo-val">{device.photoCount}</span><span className="stat-lbl">Photos</span></div>
+              <div className="stat-card"><span className="stat-val" id="stat-nod-val">{device.nodCount}</span><span className="stat-lbl">Nods</span></div>
+              <div className="stat-card"><span className="stat-val" id="stat-led-val">{device.ledBrightness}%</span><span className="stat-lbl">LED</span></div>
             </div>
           </div>
         </section>
@@ -197,11 +251,24 @@ export default function App() {
         {/* ── Packet Log ── */}
         <section className="panel log-panel">
           <div className="panel-hdr">
-            <div className="p-icon log">📋</div><h2>Packet Log</h2>
-            <div className="log-controls"><button className="icon-btn" onClick={() => { setLog([]); setStats({ sent: 0, recv: 0, errors: 0 }); }} title="Clear">🗑️</button></div>
+            <div className="p-icon log">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            </div>
+            <h2>Packet Log</h2>
+            <div className="log-controls">
+              <button className="icon-btn" onClick={() => { setLog([]); setStats({ sent: 0, recv: 0, errors: 0 }); }} title="Clear Log">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            </div>
           </div>
           <div className="log-body" ref={logRef}>
-            {log.length === 0 && <div className="log-empty"><span className="empty-icon">📡</span>Waiting for packets…<span style={{ fontSize: '.7rem', opacity: .5 }}>Click buttons to send BLE packets</span></div>}
+            {log.length === 0 && 
+              <div className="log-empty">
+                <span className="empty-icon">📡</span>
+                <span className="empty-text">Awaiting BLE Traffic</span>
+                <span className="empty-hint">Interact with the panels to generate packets</span>
+              </div>
+            }
             {log.map(e => (
               <div key={e.id} className={`log-entry ${e.dir}${e.error ? ' err' : ''}`}>
                 <div className="log-r1">
@@ -216,46 +283,79 @@ export default function App() {
             ))}
           </div>
           <div className="log-footer">
-            <span className="log-stat"><span className="dot s" /> Sent: <b>{stats.sent}</b></span>
-            <span className="log-stat"><span className="dot r" /> Recv: <b>{stats.recv}</b></span>
-            <span className="log-stat"><span className="dot e" /> Errors: <b>{stats.errors}</b></span>
-            <span className="log-stat">Uptime: <b>{uptime}</b></span>
+            <span className="log-stat"><span className="dot s" /> Tx: <b>{stats.sent}</b></span>
+            <span className="log-stat"><span className="dot r" /> Rx: <b>{stats.recv}</b></span>
+            <span className="log-stat" style={stats.errors > 0 ? {color: 'var(--rose)'} : {}}><span className="dot e" /> Err: <b>{stats.errors}</b></span>
+            <span className="log-stat" style={{marginLeft: 'auto'}}>Uptime: <b>{uptime}</b></span>
           </div>
         </section>
 
         {/* ── App Panel ── */}
-        <section className="panel">
-          <div className="panel-hdr"><div className="p-icon app">📱</div><h2>Companion App</h2><span className="p-badge app">APP</span></div>
+        <section className="panel app-panel">
+          <div className="panel-hdr"><div className="p-icon appicon">📱</div><h2>Companion App</h2><span className="p-badge appbadge">APP</span></div>
           <div className="panel-body">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <div className="group-label">Device State</div>
-              <div className="state-row" id="sr-bat"><span className="state-key">🔋 Battery</span><span className="state-val">{appSt.battery}%</span></div>
-              <div className="state-row" id="sr-chg"><span className="state-key">⚡ Charging</span><span className="state-val">{appSt.charging ? 'Yes ⚡' : 'No'}</span></div>
-              <div className="state-row" id="sr-photo"><span className="state-key">📷 Last Photo</span><span className="state-val">{appSt.lastPhoto || '—'}</span></div>
-              <div className="state-row" id="sr-nod"><span className="state-key">🤝 Nod Count</span><span className="state-val">{appSt.nodCount}</span></div>
-              <div className="state-row" id="sr-sync"><span className="state-key">🕐 Time Synced</span><span className="state-val">{appSt.timeSynced ? 'Yes ✓' : 'No'}</span></div>
+            <div className="state-group">
+              <div className="group-label">Mirrored State</div>
+              <div className="state-row" id="sr-bat">
+                <span className="state-key">🔋 Battery</span>
+                <span className={`state-val ${appSt.charging ? 'charging' : ''}`}>{appSt.battery}% {appSt.charging ? '⚡' : ''}</span>
+              </div>
+              <div className="state-row" id="sr-photo">
+                <span className="state-key">📷 Last Photo</span>
+                <span className="state-val">{appSt.lastPhoto || '—'}</span>
+              </div>
+              <div className="state-row" id="sr-nod">
+                <span className="state-key">🤝 Nod Count</span>
+                <span className="state-val">{appSt.nodCount}</span>
+              </div>
+              <div className="state-row" id="sr-sync">
+                <span className="state-key">🕐 Time Synced</span>
+                <span className={`state-val ${appSt.timeSynced ? 'synced' : ''}`}>{appSt.timeSynced ? 'Yes ✓' : 'No'}</span>
+              </div>
             </div>
 
-            <div className="action-group">
-              <div className="group-label">Controls</div>
+            <div className="action-group" style={{marginTop: 4}}>
+              <div className="group-label">Remote Controls</div>
+              
               <div className="slider-ctl">
-                <label>💡 LED Brightness</label>
-                <div className="slider-row">
-                  <input type="range" min="0" max="100" value={ledVal} onChange={e => setLedVal(+e.target.value)} onMouseUp={() => appSetLED(ledVal)} onTouchEnd={() => appSetLED(ledVal)} />
+                <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 8}}>
+                  <label style={{marginBottom: 0}}>💡 LED Brightness</label>
                   <span className="slider-val">{ledVal}%</span>
                 </div>
+                <div className="slider-row">
+                  <input 
+                    type="range" min="0" max="100" value={ledVal} 
+                    style={{backgroundSize: `${ledVal}% 100%`}}
+                    onChange={e => setLedVal(+e.target.value)} 
+                    onMouseUp={() => appSetLED(ledVal)} 
+                    onTouchEnd={() => appSetLED(ledVal)} 
+                  />
+                </div>
               </div>
-              <button className="action-btn" onClick={(e) => { ripple(e); appCapture(); }}><span className="btn-icon">📸</span> Capture Photo</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); appSyncTime(); }}><span className="btn-icon">🕐</span> Sync Time</button>
+              
+              <button className="action-btn" onClick={(e) => { ripple(e); appCapture(); }}><span className="btn-icon">📸</span> Trigger Camera</button>
+              <button className="action-btn" onClick={(e) => { ripple(e); appSyncTime(); }}><span className="btn-icon">🕐</span> Sync Local Time</button>
             </div>
 
             <div className="last-pkt">
-              <div className="group-label">Last Received</div>
+              <div className="group-label">Last Packet Received</div>
               <div className={`last-pkt-body${log.length ? ' hl' : ''}`}>
-                {log.length === 0 ? <span style={{ opacity: .5 }}>No packets yet</span>
-                  : (() => { const last = log[log.length - 1]; return last.parsed
-                    ? <div><div style={{ fontWeight: 600, marginBottom: 2 }}>{last.dir === 'd2a' ? '← ' : '→ '}{last.parsed.commandName}</div><div style={{ color: 'var(--text-3)', fontSize: '.66rem' }}>{toHexString(last.raw).substring(0, 48)}</div></div>
-                    : <span style={{ color: 'var(--rose)' }}>✗ Corrupted ({last.raw.length}B)</span>;
+                {log.length === 0 ? <span style={{ opacity: .5 }}>Awaiting data...</span>
+                  : (() => { 
+                      const last = log[log.length - 1]; 
+                      return last.parsed
+                        ? <div style={{width: '100%'}}>
+                            <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>
+                              <span className={`last-pkt-dir ${last.dir === 'd2a' ? 'recv' : 'send'}`}>
+                                {last.dir === 'd2a' ? '←' : '→'}
+                              </span>
+                              {last.parsed.commandName}
+                            </div>
+                            <div style={{ color: 'var(--text-3)', fontSize: '.64rem', wordBreak: 'break-all' }}>
+                              {toHexString(last.raw).substring(0, 40)}{last.raw.length > 13 ? '...' : ''}
+                            </div>
+                          </div>
+                        : <span style={{ color: 'var(--rose-light)' }}>✗ Corrupted Payload ({last.raw.length}B)</span>;
                   })()}
               </div>
             </div>
