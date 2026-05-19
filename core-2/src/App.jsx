@@ -74,9 +74,10 @@ function CinematicHero() {
         <div className="hero-subtitle">
           Next-Gen AI Wearable Simulator
         </div>
-        <div className="scroll-prompt">
-          <span>Scroll to Interact</span>
-        </div>
+      </div>
+      
+      <div className="scroll-prompt">
+        <span>Scroll to Interact</span>
       </div>
     </div>
   );
