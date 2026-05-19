@@ -72,4 +72,3 @@ The assignment specification left intentional gaps. Here is how they were addres
    * *More Time*: I would train a lightweight ONNX/TensorFlow Lite model for edge-execution to catch complex semantic edge cases in Hindi/Telugu that keyword scoring might miss.
 
 ---
-*Developed for the IoT BLE Developer Intern assignment.*
