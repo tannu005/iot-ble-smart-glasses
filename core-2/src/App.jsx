@@ -26,12 +26,72 @@ function ColoredHex({ bytes, parsed }) {
   if (hex.length >= 2) parts.push(<span key="sy" className="sy">{hex.slice(0, 2).join(' ')}</span>);
   if (hex.length >= 3) parts.push(<span key="cm" className="cm"> {hex[2]}</span>);
   if (hex.length >= 5) parts.push(<span key="ln" className="ln"> {hex.slice(3, 5).join(' ')}</span>);
-  
   if (parsed && parsed.payloadLength > 0) parts.push(<span key="pl" className="pl"> {hex.slice(5, 5 + parsed.payloadLength).join(' ')}</span>);
   else if (hex.length > 5) parts.push(<span key="pl" className="pl"> {hex.slice(5, hex.length > 6 ? hex.length - 1 : hex.length).join(' ')}</span>);
-  
   if (parsed || hex.length >= 6) parts.push(<span key="cr" className="cr"> {hex[hex.length - 1]}</span>);
   return <>{parts}</>;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Custom Cursor Component
+   ═══════════════════════════════════════════════════════════════ */
+function CustomCursor() {
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [isHovering, setIsHovering] = useState(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      setPos({ x: e.clientX, y: e.clientY });
+      
+      // Check if hovering over clickable elements
+      const target = e.target;
+      const isClickable = target.tagName === 'BUTTON' || target.tagName === 'A' || target.closest('button') || target.tagName === 'INPUT';
+      setIsHovering(isClickable);
+    };
+    
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
+
+  return (
+    <div 
+      className={`custom-cursor ${isHovering ? 'hovering' : ''}`}
+      style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
+    />
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Cinematic Hero Component
+   ═══════════════════════════════════════════════════════════════ */
+function CinematicHero() {
+  return (
+    <div className="hero-container">
+      <div className="hero-video-wrapper">
+        <video 
+          className="hero-video" 
+          autoPlay 
+          muted 
+          loop 
+          playsInline
+          src="https://cdn.pixabay.com/video/2021/08/04/83864-584742588_large.mp4"
+        />
+      </div>
+      
+      <div className="hero-content">
+        <div className="hero-title-layer">
+          <div className="hero-title-outline">GlassLink G1</div>
+          <div className="hero-title-solid">GlassLink G1</div>
+        </div>
+        <div className="hero-subtitle">
+          Next-Gen AI Wearable Simulator
+        </div>
+        <div className="scroll-prompt">
+          <span>Scroll to Interact</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -87,7 +147,6 @@ export default function App() {
   }, []);
 
   // ── Transmit Core ────────────────────────────────────────────
-  // Simulates passing raw bytes over the air
   const transmitOverAir = useCallback((dir, rawPkt, onReceiveCallback) => {
     if (!rawPkt) return;
     let data = rawPkt, errorMethod = null;
@@ -99,7 +158,6 @@ export default function App() {
     const now = new Date();
     const ts = now.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
     
-    // Validate direction correctly for display and parsing rules
     const expectedDir = parsed ? parsed.direction : dir;
     const isError = (!parsed || expectedDir !== dir);
 
@@ -111,7 +169,7 @@ export default function App() {
       : { ...s, errors: s.errors + 1 });
 
     if (!isError && onReceiveCallback) {
-      setTimeout(() => onReceiveCallback(parsed), 50); // Simulate processing latency
+      setTimeout(() => onReceiveCallback(parsed), 50);
     }
   }, [chaos]);
 
@@ -119,11 +177,11 @@ export default function App() {
   const handleAppReceive = useCallback((parsed) => {
     switch (parsed.command) {
       case COMMANDS.ACTION_SYNC:
-        if (parsed.payload[0] > 0) { // Photo taken
+        if (parsed.payload[0] > 0) {
           setAppSt(a => ({ ...a, lastPhoto: new Date().toLocaleTimeString() })); 
           flashState('sr-photo');
         }
-        if (parsed.payload[5] > 0) { // Nod detected
+        if (parsed.payload[5] > 0) {
           setAppSt(a => ({ ...a, nodCount: a.nodCount + parsed.payload[5] })); 
           flashState('sr-nod');
         }
@@ -134,7 +192,6 @@ export default function App() {
         flashState('sr-bat');
         break;
       case COMMANDS.GET_BATTERY:
-        // Reply from device
         setAppSt(a => ({ ...a, battery: parsed.payload[0], charging: parsed.payload[1] > 0 }));
         flashState('sr-bat');
         break;
@@ -152,10 +209,8 @@ export default function App() {
         break;
       }
       case COMMANDS.TAKE_PHOTO:
-        // Device captures photo, then alerts app
         setDevice(d => { 
           const next = { ...d, photoCount: d.photoCount + 1 };
-          // send action sync back
           const syncPkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [1, 0, 0, 0, 0, 0, 0, 0, next.worn]);
           setTimeout(() => transmitOverAir('d2a', syncPkt, handleAppReceive), 200);
           return next; 
@@ -163,7 +218,6 @@ export default function App() {
         popStat('stat-photo-val');
         break;
       case COMMANDS.GET_BATTERY:
-        // Device responds with battery reply
         setDevice(d => {
           const reply = buildPacket('d2a', COMMANDS.GET_BATTERY, [d.battery, d.charging ? 1 : 0]);
           setTimeout(() => transmitOverAir('d2a', reply, handleAppReceive), 100);
@@ -171,7 +225,6 @@ export default function App() {
         });
         break;
       case COMMANDS.SYNC_TIME:
-        // Just accept silently
         break;
       default: break;
     }
@@ -181,13 +234,12 @@ export default function App() {
   const devicePhoto = useCallback(() => {
     setDevice(d => { const n = d.photoCount + 1; return { ...d, photoCount: n }; });
     popStat('stat-photo-val');
-    // Payload: [photo, recording, mic, vol+, vol-, nod, shake, music, worn]
     const pkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [1, 0, 0, 0, 0, 0, 0, 0, device.worn]);
     transmitOverAir('d2a', pkt, handleAppReceive);
   }, [device.worn, transmitOverAir, handleAppReceive, popStat]);
 
   const deviceNod = useCallback(() => {
-    const nodType = 1 + Math.floor(Math.random() * 2); // 1 or 2 (single or double)
+    const nodType = 1 + Math.floor(Math.random() * 2); 
     setDevice(d => ({ ...d, nodCount: d.nodCount + nodType }));
     popStat('stat-nod-val');
     const pkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [0, 0, 0, 0, 0, nodType, 0, 0, device.worn]);
@@ -203,9 +255,9 @@ export default function App() {
 
   // ── UI Actions (App side) ──────────────────────────────────────
   const appSetLED = useCallback((v) => {
-    let mode = 0x30; // low
-    if (v > 33) mode = 0x31; // med
-    if (v > 66) mode = 0x32; // high
+    let mode = 0x30; 
+    if (v > 33) mode = 0x31; 
+    if (v > 66) mode = 0x32; 
     
     setAppSt(a => ({ ...a, led: v }));
     transmitOverAir('a2d', buildPacket('a2d', COMMANDS.SET_LED, [mode]), handleDeviceReceive);
@@ -253,182 +305,188 @@ export default function App() {
   };
 
   return (
-    <div className="simulator-root">
-      {/* ═══ Header ═══ */}
-      <header className="header">
-        <div className="header-left">
-          <div className="logo-icon">
-            <svg viewBox="0 0 32 32" width="22" height="22" fill="none"><rect x="2" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><rect x="20" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M12 14h8" stroke="currentColor" strokeWidth="2"/><circle cx="7" cy="14" r="2" fill="currentColor"/><circle cx="25" cy="14" r="2" fill="currentColor"/></svg>
+    <>
+      <CustomCursor />
+      
+      {/* Cinematic Masked Video Hero */}
+      <CinematicHero />
+
+      <div id="simulator-section">
+        {/* ═══ Header ═══ */}
+        <header className="header">
+          <div className="header-left">
+            <div className="logo-icon">
+              <svg viewBox="0 0 32 32" width="22" height="22" fill="none"><rect x="2" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><rect x="20" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M12 14h8" stroke="currentColor" strokeWidth="2"/><circle cx="7" cy="14" r="2" fill="currentColor"/><circle cx="25" cy="14" r="2" fill="currentColor"/></svg>
+            </div>
+            <div className="header-title"><h1>BLE Smart Glasses</h1><span className="subtitle">Live Device Simulator</span></div>
           </div>
-          <div className="header-title"><h1>BLE Smart Glasses</h1><span className="subtitle">Live Device Simulator</span></div>
-        </div>
-        
-        <div className="header-center">
-          <button className={`auto-sim-btn${autoSim ? ' active' : ''}`} onClick={() => setAutoSim(a => !a)} style={{marginRight: 16}} title="Generate random traffic">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            Auto
-          </button>
-          <div className="conn-badge"><span className="pulse-dot" /><span className="conn-text">Connected</span></div>
-        </div>
-        
-        <div className="header-right">
-          <button className={`chaos-btn${chaos ? ' active' : ''}`} onClick={() => setChaos(c => !c)} title="Corrupt 10% of packets randomly">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            Chaos
-          </button>
-          {chaos && <span className="chaos-badge">10 % corrupt</span>}
-        </div>
-      </header>
-
-      {/* ═══ Grid ═══ */}
-      <main className="main-grid">
-
-        {/* ── Device Panel ── */}
-        <section className="panel device-panel">
-          <div className="panel-hdr"><div className="p-icon device">🕶️</div><h2>Smart Glasses</h2><span className="p-badge device">DEVICE</span></div>
-          <div className="panel-body">
-            
-            <div className="battery-display">
-              <div className="battery-shell">
-                <div className={`battery-fill ${device.battery <= 20 ? 'low' : 'ok'} ${device.charging ? 'charging' : ''}`} style={{ width: `${device.battery}%` }} />
-                <div className="battery-tip" />
-              </div>
-              <div className="battery-info">
-                <span className="battery-pct">{device.battery}%</span>
-                <span className="battery-lbl">{device.charging ? '⚡ Charging' : 'Discharging'}</span>
-              </div>
-            </div>
-
-            <div className="action-group" style={{marginTop: 4}}>
-              <div className="group-label">Sensors & Events</div>
-              <button className="action-btn" onClick={(e) => { ripple(e); devicePhoto(); }}><span className="btn-icon">📷</span> Capture Photo</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); deviceNod(); }}><span className="btn-icon">🤝</span> Detect Head Nod</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); deviceCharge(); }}><span className="btn-icon">⚡</span> Toggle Charging State</button>
-            </div>
-
-            <div className="stats-grid" style={{marginTop: 'auto'}}>
-              <div className="stat-card"><span className="stat-val" id="stat-photo-val">{device.photoCount}</span><span className="stat-lbl">Photos</span></div>
-              <div className="stat-card"><span className="stat-val" id="stat-nod-val">{device.nodCount}</span><span className="stat-lbl">Nods</span></div>
-              <div className="stat-card"><span className="stat-val" id="stat-led-val">{device.ledBrightness}%</span><span className="stat-lbl">LED</span></div>
-            </div>
+          
+          <div className="header-center">
+            <div className="conn-badge"><span className="pulse-dot" /><span className="conn-text">Connected</span></div>
           </div>
-        </section>
-
-        {/* ── Packet Log ── */}
-        <section className="panel log-panel">
-          <div className="panel-hdr">
-            <div className="p-icon log">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-            </div>
-            <h2>Packet Log</h2>
-            <div className="log-controls">
-              <button className="icon-btn" onClick={() => { setLog([]); setStats({ sent: 0, recv: 0, errors: 0 }); }} title="Clear Log">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-              </button>
-            </div>
+          
+          <div className="header-right">
+            <button className={`auto-sim-btn${autoSim ? ' active' : ''}`} onClick={() => setAutoSim(a => !a)} title="Generate random traffic">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              Auto Simulate
+            </button>
+            <button className={`chaos-btn${chaos ? ' active' : ''}`} onClick={() => setChaos(c => !c)} title="Corrupt 10% of packets randomly">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              Chaos Mode
+            </button>
           </div>
-          <div className="log-body" ref={logRef}>
-            {log.length === 0 && 
-              <div className="log-empty">
-                <span className="empty-icon">📡</span>
-                <span className="empty-text">Awaiting BLE Traffic</span>
-                <span className="empty-hint">Interact with the panels to generate packets</span>
-              </div>
-            }
-            {log.map(e => (
-              <div key={e.id} className={`log-entry ${e.dir}${e.error ? ' err' : ''}`}>
-                <div className="log-r1">
-                  <span className="log-time">{e.ts}</span>
-                  <span className={`log-arrow ${e.error ? 'err' : e.dir === 'd2a' ? 'recv' : 'send'}`}>{e.error ? '✗' : e.dir === 'd2a' ? '←' : '→'}</span>
-                  <span className="log-cmd">{e.parsed ? e.parsed.commandName : 'CORRUPTED'}</span>
-                  <span className="log-interp">{e.parsed ? interpretPacket(e.parsed) : (e.error || 'Parse failed')}</span>
-                </div>
-                <div className="log-r2"><span className="log-hex"><ColoredHex bytes={e.raw} parsed={e.parsed} /></span></div>
-                {e.error && <div className="log-err-detail">⚠ {e.error}</div>}
-              </div>
-            ))}
-          </div>
-          <div className="log-footer">
-            <span className="log-stat"><span className="dot s" /> App Tx: <b>{stats.sent}</b></span>
-            <span className="log-stat"><span className="dot r" /> Dev Tx: <b>{stats.recv}</b></span>
-            <span className="log-stat" style={stats.errors > 0 ? {color: 'var(--rose)'} : {}}><span className="dot e" /> Err: <b>{stats.errors}</b></span>
-            <span className="log-stat" style={{marginLeft: 'auto'}}>Uptime: <b>{uptime}</b></span>
-          </div>
-        </section>
+        </header>
 
-        {/* ── App Panel ── */}
-        <section className="panel app-panel">
-          <div className="panel-hdr"><div className="p-icon appicon">📱</div><h2>Companion App</h2><span className="p-badge appbadge">APP</span></div>
-          <div className="panel-body">
-            <div className="state-group">
-              <div className="group-label">Mirrored State</div>
-              <div className="state-row" id="sr-bat">
-                <span className="state-key">🔋 Battery</span>
-                <span className={`state-val ${appSt.charging ? 'charging' : ''}`}>{appSt.battery}% {appSt.charging ? '⚡' : ''}</span>
-              </div>
-              <div className="state-row" id="sr-photo">
-                <span className="state-key">📷 Last Photo</span>
-                <span className="state-val">{appSt.lastPhoto || '—'}</span>
-              </div>
-              <div className="state-row" id="sr-nod">
-                <span className="state-key">🤝 Nod Count</span>
-                <span className="state-val">{appSt.nodCount}</span>
-              </div>
-              <div className="state-row" id="sr-sync">
-                <span className="state-key">🕐 Time Synced</span>
-                <span className={`state-val ${appSt.timeSynced ? 'synced' : ''}`}>{appSt.timeSynced ? 'Yes ✓' : 'No'}</span>
-              </div>
-            </div>
+        {/* ═══ Grid ═══ */}
+        <main className="main-grid">
 
-            <div className="action-group" style={{marginTop: 4}}>
-              <div className="group-label">Remote Controls</div>
+          {/* ── Device Panel ── */}
+          <section className="panel device-panel">
+            <div className="panel-hdr"><div className="p-icon device">🕶️</div><h2>Smart Glasses</h2><span className="p-badge device">DEVICE</span></div>
+            <div className="panel-body">
               
-              <div className="slider-ctl">
-                <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 8}}>
-                  <label style={{marginBottom: 0}}>💡 LED Brightness</label>
-                  <span className="slider-val">{ledVal}%</span>
+              <div className="battery-display">
+                <div className="battery-shell">
+                  <div className={`battery-fill ${device.battery <= 20 ? 'low' : 'ok'} ${device.charging ? 'charging' : ''}`} style={{ width: `${device.battery}%` }} />
+                  <div className="battery-tip" />
                 </div>
-                <div className="slider-row">
-                  <input 
-                    type="range" min="0" max="100" value={ledVal} 
-                    style={{backgroundSize: `${ledVal}% 100%`}}
-                    onChange={e => setLedVal(+e.target.value)} 
-                    onMouseUp={() => appSetLED(ledVal)} 
-                    onTouchEnd={() => appSetLED(ledVal)} 
-                  />
+                <div className="battery-info">
+                  <span className="battery-pct">{device.battery}%</span>
+                  <span className="battery-lbl">{device.charging ? 'Charging' : 'Discharging'}</span>
                 </div>
               </div>
-              
-              <button className="action-btn" onClick={(e) => { ripple(e); appCapture(); }}><span className="btn-icon">📸</span> Trigger Camera</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); appGetBattery(); }}><span className="btn-icon">🔋</span> Request Battery</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); appSyncTime(); }}><span className="btn-icon">🕐</span> Sync Local Time</button>
-            </div>
 
-            <div className="last-pkt">
-              <div className="group-label">Last Packet Received</div>
-              <div className={`last-pkt-body${log.length ? ' hl' : ''}`}>
-                {log.length === 0 ? <span style={{ opacity: .5 }}>Awaiting data...</span>
-                  : (() => { 
-                      const last = log[log.length - 1]; 
-                      return last.parsed
-                        ? <div style={{width: '100%'}}>
-                            <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>
-                              <span className={`last-pkt-dir ${last.dir === 'd2a' ? 'recv' : 'send'}`}>
-                                {last.dir === 'd2a' ? '←' : '→'}
-                              </span>
-                              {last.parsed.commandName}
-                            </div>
-                            <div style={{ color: 'var(--text-3)', fontSize: '.64rem', wordBreak: 'break-all' }}>
-                              {toHexString(last.raw).substring(0, 40)}{last.raw.length > 13 ? '...' : ''}
-                            </div>
-                          </div>
-                        : <span style={{ color: 'var(--rose-light)' }}>✗ Corrupted Payload ({last.raw.length}B)</span>;
-                  })()}
+              <div className="action-group">
+                <div className="group-label">Sensors & Events</div>
+                <button className="action-btn" onClick={(e) => { ripple(e); devicePhoto(); }}><span className="btn-icon">📷</span> Capture Photo</button>
+                <button className="action-btn" onClick={(e) => { ripple(e); deviceNod(); }}><span className="btn-icon">🤝</span> Detect Head Nod</button>
+                <button className="action-btn" onClick={(e) => { ripple(e); deviceCharge(); }}><span className="btn-icon">⚡</span> Toggle Charging</button>
+              </div>
+
+              <div className="stats-grid" style={{marginTop: 'auto'}}>
+                <div className="stat-card"><span className="stat-val" id="stat-photo-val">{device.photoCount}</span><span className="stat-lbl">Photos</span></div>
+                <div className="stat-card"><span className="stat-val" id="stat-nod-val">{device.nodCount}</span><span className="stat-lbl">Nods</span></div>
+                <div className="stat-card"><span className="stat-val" id="stat-led-val">{device.ledBrightness}%</span><span className="stat-lbl">LED</span></div>
               </div>
             </div>
-          </div>
-        </section>
-      </main>
-    </div>
+          </section>
+
+          {/* ── Packet Log ── */}
+          <section className="panel log-panel">
+            <div className="panel-hdr">
+              <div className="p-icon log">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              </div>
+              <h2>Packet Log</h2>
+              <div className="log-controls">
+                <button className="icon-btn" onClick={() => { setLog([]); setStats({ sent: 0, recv: 0, errors: 0 }); }} title="Clear Log">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div className="log-body" ref={logRef}>
+              {log.length === 0 && 
+                <div className="log-empty">
+                  <span className="empty-icon">📡</span>
+                  <span className="empty-text">Awaiting BLE Traffic</span>
+                  <span className="empty-hint">Interact with the panels to generate packets</span>
+                </div>
+              }
+              {log.map(e => (
+                <div key={e.id} className={`log-entry ${e.dir}${e.error ? ' err' : ''}`}>
+                  <div className="log-r1">
+                    <span className="log-time">{e.ts}</span>
+                    <span className={`log-arrow ${e.error ? 'err' : e.dir === 'd2a' ? 'recv' : 'send'}`}>{e.error ? '✗' : e.dir === 'd2a' ? '←' : '→'}</span>
+                    <span className="log-cmd">{e.parsed ? e.parsed.commandName : 'CORRUPTED'}</span>
+                    <span className="log-interp">{e.parsed ? interpretPacket(e.parsed) : (e.error || 'Parse failed')}</span>
+                  </div>
+                  <div className="log-r2"><span className="log-hex"><ColoredHex bytes={e.raw} parsed={e.parsed} /></span></div>
+                  {e.error && <div className="log-err-detail">⚠ {e.error}</div>}
+                </div>
+              ))}
+            </div>
+            <div className="log-footer">
+              <span className="log-stat"><span className="dot s" /> App Tx: <b>{stats.sent}</b></span>
+              <span className="log-stat"><span className="dot r" /> Dev Tx: <b>{stats.recv}</b></span>
+              <span className="log-stat" style={stats.errors > 0 ? {color: 'var(--rose)'} : {}}><span className="dot e" /> Err: <b>{stats.errors}</b></span>
+              <span className="log-stat" style={{marginLeft: 'auto'}}>Uptime: <b>{uptime}</b></span>
+            </div>
+          </section>
+
+          {/* ── App Panel ── */}
+          <section className="panel app-panel">
+            <div className="panel-hdr"><div className="p-icon appicon">📱</div><h2>Companion App</h2><span className="p-badge appbadge">APP</span></div>
+            <div className="panel-body">
+              <div className="state-group">
+                <div className="group-label">Mirrored State</div>
+                <div className="state-row" id="sr-bat">
+                  <span className="state-key">🔋 Battery</span>
+                  <span className={`state-val ${appSt.charging ? 'charging' : ''}`}>{appSt.battery}% {appSt.charging ? '⚡' : ''}</span>
+                </div>
+                <div className="state-row" id="sr-photo">
+                  <span className="state-key">📷 Last Photo</span>
+                  <span className="state-val">{appSt.lastPhoto || '—'}</span>
+                </div>
+                <div className="state-row" id="sr-nod">
+                  <span className="state-key">🤝 Nod Count</span>
+                  <span className="state-val">{appSt.nodCount}</span>
+                </div>
+                <div className="state-row" id="sr-sync">
+                  <span className="state-key">🕐 Time Synced</span>
+                  <span className={`state-val ${appSt.timeSynced ? 'synced' : ''}`}>{appSt.timeSynced ? 'Yes ✓' : 'No'}</span>
+                </div>
+              </div>
+
+              <div className="action-group">
+                <div className="group-label">Remote Controls</div>
+                
+                <div className="slider-ctl">
+                  <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 8}}>
+                    <label style={{marginBottom: 0}}>💡 LED Brightness</label>
+                    <span className="slider-val">{ledVal}%</span>
+                  </div>
+                  <div className="slider-row">
+                    <input 
+                      type="range" min="0" max="100" value={ledVal} 
+                      style={{backgroundSize: `${ledVal}% 100%`}}
+                      onChange={e => setLedVal(+e.target.value)} 
+                      onMouseUp={() => appSetLED(ledVal)} 
+                      onTouchEnd={() => appSetLED(ledVal)} 
+                    />
+                  </div>
+                </div>
+                
+                <button className="action-btn" onClick={(e) => { ripple(e); appCapture(); }}><span className="btn-icon">📸</span> Trigger Camera</button>
+                <button className="action-btn" onClick={(e) => { ripple(e); appGetBattery(); }}><span className="btn-icon">🔋</span> Request Battery</button>
+                <button className="action-btn" onClick={(e) => { ripple(e); appSyncTime(); }}><span className="btn-icon">🕐</span> Sync Local Time</button>
+              </div>
+
+              <div className="last-pkt">
+                <div className="group-label">Last Packet Received</div>
+                <div className={`last-pkt-body${log.length ? ' hl' : ''}`}>
+                  {log.length === 0 ? <span style={{ opacity: .5 }}>Awaiting data...</span>
+                    : (() => { 
+                        const last = log[log.length - 1]; 
+                        return last.parsed
+                          ? <div style={{width: '100%'}}>
+                              <div style={{ fontWeight: 800, marginBottom: 4, color: 'var(--text)' }}>
+                                <span className={`last-pkt-dir ${last.dir === 'd2a' ? 'recv' : 'send'}`}>
+                                  {last.dir === 'd2a' ? '←' : '→'}
+                                </span>
+                                {last.parsed.commandName}
+                              </div>
+                              <div style={{ color: 'var(--text-3)', fontSize: '.7rem', wordBreak: 'break-all' }}>
+                                {toHexString(last.raw).substring(0, 40)}{last.raw.length > 13 ? '...' : ''}
+                              </div>
+                            </div>
+                          : <span style={{ color: 'var(--rose-light)' }}>✗ Corrupted Payload ({last.raw.length}B)</span>;
+                    })()}
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </>
   );
 }
