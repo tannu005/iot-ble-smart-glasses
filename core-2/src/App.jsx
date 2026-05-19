@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { buildPacket, parsePacket, COMMANDS, HEADER_SIZE, interpretPacket, toHexString } from './protocol';
+import { buildPacket, parsePacket, COMMANDS, interpretPacket, toHexString } from './protocol';
 
 /* ═══════════════════════════════════════════════════════════════
    Chaos Engine — corrupt 10 % of packets
@@ -10,7 +10,7 @@ function chaosCorrupt(packet) {
   const method = methods[Math.floor(Math.random() * methods.length)];
   switch (method) {
     case 'flip_byte': { const i = 2 + Math.floor(Math.random() * (copy.length - 2)); copy[i] ^= (1 << Math.floor(Math.random() * 8)); return { data: copy, method: `Bit-flip @ byte ${i}` }; }
-    case 'truncate': { const cut = Math.max(3, copy.length - 1 - Math.floor(Math.random() * 3)); return { data: copy.slice(0, cut), method: `Truncated → ${cut}B` }; }
+    case 'truncate': { const cut = Math.max(4, copy.length - 1 - Math.floor(Math.random() * 3)); return { data: copy.slice(0, cut), method: `Truncated → ${cut}B` }; }
     case 'bad_crc': copy[copy.length - 1] ^= 0xFF; return { data: copy, method: 'CRC corrupted' };
     default: return { data: copy, method: null };
   }
@@ -26,9 +26,11 @@ function ColoredHex({ bytes, parsed }) {
   if (hex.length >= 2) parts.push(<span key="sy" className="sy">{hex.slice(0, 2).join(' ')}</span>);
   if (hex.length >= 3) parts.push(<span key="cm" className="cm"> {hex[2]}</span>);
   if (hex.length >= 5) parts.push(<span key="ln" className="ln"> {hex.slice(3, 5).join(' ')}</span>);
+  
   if (parsed && parsed.payloadLength > 0) parts.push(<span key="pl" className="pl"> {hex.slice(5, 5 + parsed.payloadLength).join(' ')}</span>);
   else if (hex.length > 5) parts.push(<span key="pl" className="pl"> {hex.slice(5, hex.length > 6 ? hex.length - 1 : hex.length).join(' ')}</span>);
-  if (parsed) parts.push(<span key="cr" className="cr"> {hex[hex.length - 1]}</span>);
+  
+  if (parsed || hex.length >= 6) parts.push(<span key="cr" className="cr"> {hex[hex.length - 1]}</span>);
   return <>{parts}</>;
 }
 
@@ -36,7 +38,7 @@ function ColoredHex({ bytes, parsed }) {
    App
    ═══════════════════════════════════════════════════════════════ */
 export default function App() {
-  const [device, setDevice] = useState({ battery: 85, charging: false, ledBrightness: 50, photoCount: 0, nodCount: 0 });
+  const [device, setDevice] = useState({ battery: 85, charging: false, ledBrightness: 50, photoCount: 0, nodCount: 0, worn: 1 });
   const [appSt, setAppSt] = useState({ battery: 85, charging: false, lastPhoto: null, nodCount: 0, timeSynced: false, led: 50 });
   const [log, setLog] = useState([]);
   const [stats, setStats] = useState({ sent: 0, recv: 0, errors: 0 });
@@ -67,19 +69,6 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  // Auto-Simulate Engine
-  useEffect(() => {
-    if (!autoSim) return;
-    const actions = [devicePhoto, deviceNod, deviceBattery, appCapture, appSyncTime];
-    const t = setInterval(() => {
-      if (Math.random() > 0.3) {
-        const action = actions[Math.floor(Math.random() * actions.length)];
-        action();
-      }
-    }, 3500);
-    return () => clearInterval(t);
-  }, [autoSim]);
-
   // Auto-scroll log
   useEffect(() => { 
     if (logRef.current) {
@@ -87,20 +76,19 @@ export default function App() {
     }
   }, [log]);
 
-  // Flash helper
   const flashState = useCallback((id) => {
     const el = document.getElementById(id);
     if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 600); }
   }, []);
   
-  // Stat pop helper
   const popStat = useCallback((id) => {
     const el = document.getElementById(id);
     if (el) { el.classList.remove('up'); void el.offsetWidth; el.classList.add('up'); setTimeout(() => el.classList.remove('up'), 400); }
   }, []);
 
-  // ── Transmit ────────────────────────────────────────────
-  const transmit = useCallback((dir, rawPkt, onSuccess) => {
+  // ── Transmit Core ────────────────────────────────────────────
+  // Simulates passing raw bytes over the air
+  const transmitOverAir = useCallback((dir, rawPkt, onReceiveCallback) => {
     if (!rawPkt) return;
     let data = rawPkt, errorMethod = null;
     if (chaos && Math.random() < 0.10) {
@@ -110,69 +98,148 @@ export default function App() {
     const parsed = parsePacket(data);
     const now = new Date();
     const ts = now.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
-    const entry = { id: ++idRef.current, ts, dir, raw: data, parsed, error: errorMethod && !parsed ? errorMethod : null };
+    
+    // Validate direction correctly for display and parsing rules
+    const expectedDir = parsed ? parsed.direction : dir;
+    const isError = (!parsed || expectedDir !== dir);
+
+    const entry = { id: ++idRef.current, ts, dir, raw: data, parsed: isError ? null : parsed, error: errorMethod || (isError ? "Malformed Packet" : null) };
 
     setLog(prev => [...prev.slice(-199), entry]);
-    setStats(s => parsed
+    setStats(s => !isError
       ? (dir === 'd2a' ? { ...s, recv: s.recv + 1 } : { ...s, sent: s.sent + 1 })
       : { ...s, errors: s.errors + 1 });
 
-    if (parsed && onSuccess) onSuccess();
+    if (!isError && onReceiveCallback) {
+      setTimeout(() => onReceiveCallback(parsed), 50); // Simulate processing latency
+    }
   }, [chaos]);
 
-  // ── Device Actions ──────────────────────────────────────
+  // ── Device -> App Pipeline ──────────────────────────────────────
+  const handleAppReceive = useCallback((parsed) => {
+    switch (parsed.command) {
+      case COMMANDS.ACTION_SYNC:
+        if (parsed.payload[0] > 0) { // Photo taken
+          setAppSt(a => ({ ...a, lastPhoto: new Date().toLocaleTimeString() })); 
+          flashState('sr-photo');
+        }
+        if (parsed.payload[5] > 0) { // Nod detected
+          setAppSt(a => ({ ...a, nodCount: a.nodCount + parsed.payload[5] })); 
+          flashState('sr-nod');
+        }
+        break;
+      case COMMANDS.CHARGING_STATUS:
+        setAppSt(a => ({ ...a, charging: parsed.payload[0] > 0, battery: parsed.payload[1] }));
+        flashState('sr-chg');
+        flashState('sr-bat');
+        break;
+      case COMMANDS.GET_BATTERY:
+        // Reply from device
+        setAppSt(a => ({ ...a, battery: parsed.payload[0], charging: parsed.payload[1] > 0 }));
+        flashState('sr-bat');
+        break;
+      default: break;
+    }
+  }, [flashState]);
+
+  // ── App -> Device Pipeline ──────────────────────────────────────
+  const handleDeviceReceive = useCallback((parsed) => {
+    switch (parsed.command) {
+      case COMMANDS.SET_LED: {
+        const val = parsed.payload[0] === 0x32 ? 100 : (parsed.payload[0] === 0x31 ? 50 : 0);
+        setDevice(d => ({ ...d, ledBrightness: val }));
+        popStat('stat-led-val');
+        break;
+      }
+      case COMMANDS.TAKE_PHOTO:
+        // Device captures photo, then alerts app
+        setDevice(d => { 
+          const next = { ...d, photoCount: d.photoCount + 1 };
+          // send action sync back
+          const syncPkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [1, 0, 0, 0, 0, 0, 0, 0, next.worn]);
+          setTimeout(() => transmitOverAir('d2a', syncPkt, handleAppReceive), 200);
+          return next; 
+        });
+        popStat('stat-photo-val');
+        break;
+      case COMMANDS.GET_BATTERY:
+        // Device responds with battery reply
+        setDevice(d => {
+          const reply = buildPacket('d2a', COMMANDS.GET_BATTERY, [d.battery, d.charging ? 1 : 0]);
+          setTimeout(() => transmitOverAir('d2a', reply, handleAppReceive), 100);
+          return d;
+        });
+        break;
+      case COMMANDS.SYNC_TIME:
+        // Just accept silently
+        break;
+      default: break;
+    }
+  }, [transmitOverAir, handleAppReceive, popStat]);
+
+  // ── UI Actions (Device side) ──────────────────────────────────────
   const devicePhoto = useCallback(() => {
     setDevice(d => { const n = d.photoCount + 1; return { ...d, photoCount: n }; });
     popStat('stat-photo-val');
-    const pkt = buildPacket(COMMANDS.PHOTO_CAPTURED, [(device.photoCount + 1) & 0xFF]);
-    transmit('d2a', pkt, () => { setAppSt(a => ({ ...a, lastPhoto: new Date().toLocaleTimeString() })); flashState('sr-photo'); });
-  }, [device.photoCount, transmit, flashState, popStat]);
+    // Payload: [photo, recording, mic, vol+, vol-, nod, shake, music, worn]
+    const pkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [1, 0, 0, 0, 0, 0, 0, 0, device.worn]);
+    transmitOverAir('d2a', pkt, handleAppReceive);
+  }, [device.worn, transmitOverAir, handleAppReceive, popStat]);
 
   const deviceNod = useCallback(() => {
-    const nodType = Math.floor(Math.random() * 3);
-    setDevice(d => ({ ...d, nodCount: d.nodCount + 1 }));
+    const nodType = 1 + Math.floor(Math.random() * 2); // 1 or 2 (single or double)
+    setDevice(d => ({ ...d, nodCount: d.nodCount + nodType }));
     popStat('stat-nod-val');
-    transmit('d2a', buildPacket(COMMANDS.NOD_DETECTED, [nodType]), () => { 
-      setAppSt(a => ({ ...a, nodCount: a.nodCount + 1 })); 
-      flashState('sr-nod'); 
-    });
-  }, [transmit, flashState, popStat]);
-
-  const deviceBattery = useCallback(() => {
-    transmit('d2a', buildPacket(COMMANDS.BATTERY_LEVEL, [device.battery]), () => { setAppSt(a => ({ ...a, battery: device.battery })); flashState('sr-bat'); });
-  }, [device.battery, transmit, flashState]);
+    const pkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [0, 0, 0, 0, 0, nodType, 0, 0, device.worn]);
+    transmitOverAir('d2a', pkt, handleAppReceive);
+  }, [device.worn, transmitOverAir, handleAppReceive, popStat]);
 
   const deviceCharge = useCallback(() => {
     const next = !device.charging;
     setDevice(d => ({ ...d, charging: next }));
-    transmit('d2a', buildPacket(COMMANDS.CHARGING_STATE, [next ? 1 : 0]), () => { setAppSt(a => ({ ...a, charging: next })); flashState('sr-chg'); });
-  }, [device.charging, transmit, flashState]);
+    const pkt = buildPacket('d2a', COMMANDS.CHARGING_STATUS, [next ? 1 : 0, device.battery]);
+    transmitOverAir('d2a', pkt, handleAppReceive);
+  }, [device.battery, device.charging, transmitOverAir, handleAppReceive]);
 
-  // ── App Actions ─────────────────────────────────────────
+  // ── UI Actions (App side) ──────────────────────────────────────
   const appSetLED = useCallback((v) => {
-    const val = Math.max(0, Math.min(100, v));
-    transmit('a2d', buildPacket(COMMANDS.SET_LED, [val]), () => {
-      setDevice(d => ({ ...d, ledBrightness: val }));
-      popStat('stat-led-val');
-      setAppSt(a => ({ ...a, led: val }));
-      setTimeout(() => transmit('d2a', buildPacket(COMMANDS.ACK, [COMMANDS.SET_LED])), 150);
-    });
-  }, [transmit, popStat]);
+    let mode = 0x30; // low
+    if (v > 33) mode = 0x31; // med
+    if (v > 66) mode = 0x32; // high
+    
+    setAppSt(a => ({ ...a, led: v }));
+    transmitOverAir('a2d', buildPacket('a2d', COMMANDS.SET_LED, [mode]), handleDeviceReceive);
+  }, [transmitOverAir, handleDeviceReceive]);
 
   const appCapture = useCallback(() => {
-    transmit('a2d', buildPacket(COMMANDS.TRIGGER_PHOTO, []), () => { setTimeout(() => devicePhoto(), 450); });
-  }, [transmit, devicePhoto]);
+    transmitOverAir('a2d', buildPacket('a2d', COMMANDS.TAKE_PHOTO, [0x30]), handleDeviceReceive);
+  }, [transmitOverAir, handleDeviceReceive]);
+  
+  const appGetBattery = useCallback(() => {
+    transmitOverAir('a2d', buildPacket('a2d', COMMANDS.GET_BATTERY, []), handleDeviceReceive);
+  }, [transmitOverAir, handleDeviceReceive]);
 
   const appSyncTime = useCallback(() => {
-    const epoch = Math.floor(Date.now() / 1000);
-    const pl = [epoch & 0xFF, (epoch >> 8) & 0xFF, (epoch >> 16) & 0xFF, (epoch >> 24) & 0xFF];
-    transmit('a2d', buildPacket(COMMANDS.SYNC_TIME, pl), () => {
-      setAppSt(a => ({ ...a, timeSynced: true })); flashState('sr-sync');
-      setTimeout(() => transmit('d2a', buildPacket(COMMANDS.ACK, [COMMANDS.SYNC_TIME])), 120);
-    });
-  }, [transmit, flashState]);
+    const d = new Date();
+    const y = d.getFullYear();
+    const pl = [ (y >> 8) & 0xFF, y & 0xFF, d.getMonth()+1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds() ];
+    transmitOverAir('a2d', buildPacket('a2d', COMMANDS.SYNC_TIME, pl), handleDeviceReceive);
+    setAppSt(a => ({ ...a, timeSynced: true })); flashState('sr-sync');
+  }, [transmitOverAir, handleDeviceReceive, flashState]);
 
-  // ── Button ripple helper ────────────────────────────────
+  // Auto-Simulate Engine
+  useEffect(() => {
+    if (!autoSim) return;
+    const actions = [devicePhoto, deviceNod, deviceCharge, appCapture, appGetBattery, appSyncTime];
+    const t = setInterval(() => {
+      if (Math.random() > 0.2) {
+        const action = actions[Math.floor(Math.random() * actions.length)];
+        action();
+      }
+    }, 3500);
+    return () => clearInterval(t);
+  }, [autoSim, devicePhoto, deviceNod, deviceCharge, appCapture, appGetBattery, appSyncTime]);
+
   const ripple = (e) => { 
     const el = e.currentTarget; 
     const rect = el.getBoundingClientRect();
@@ -236,7 +303,6 @@ export default function App() {
               <div className="group-label">Sensors & Events</div>
               <button className="action-btn" onClick={(e) => { ripple(e); devicePhoto(); }}><span className="btn-icon">📷</span> Capture Photo</button>
               <button className="action-btn" onClick={(e) => { ripple(e); deviceNod(); }}><span className="btn-icon">🤝</span> Detect Head Nod</button>
-              <button className="action-btn" onClick={(e) => { ripple(e); deviceBattery(); }}><span className="btn-icon">🔋</span> Send Battery Status</button>
               <button className="action-btn" onClick={(e) => { ripple(e); deviceCharge(); }}><span className="btn-icon">⚡</span> Toggle Charging State</button>
             </div>
 
@@ -283,8 +349,8 @@ export default function App() {
             ))}
           </div>
           <div className="log-footer">
-            <span className="log-stat"><span className="dot s" /> Tx: <b>{stats.sent}</b></span>
-            <span className="log-stat"><span className="dot r" /> Rx: <b>{stats.recv}</b></span>
+            <span className="log-stat"><span className="dot s" /> App Tx: <b>{stats.sent}</b></span>
+            <span className="log-stat"><span className="dot r" /> Dev Tx: <b>{stats.recv}</b></span>
             <span className="log-stat" style={stats.errors > 0 ? {color: 'var(--rose)'} : {}}><span className="dot e" /> Err: <b>{stats.errors}</b></span>
             <span className="log-stat" style={{marginLeft: 'auto'}}>Uptime: <b>{uptime}</b></span>
           </div>
@@ -334,6 +400,7 @@ export default function App() {
               </div>
               
               <button className="action-btn" onClick={(e) => { ripple(e); appCapture(); }}><span className="btn-icon">📸</span> Trigger Camera</button>
+              <button className="action-btn" onClick={(e) => { ripple(e); appGetBattery(); }}><span className="btn-icon">🔋</span> Request Battery</button>
               <button className="action-btn" onClick={(e) => { ripple(e); appSyncTime(); }}><span className="btn-icon">🕐</span> Sync Local Time</button>
             </div>
 

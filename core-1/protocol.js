@@ -1,151 +1,192 @@
 /**
  * ════════════════════════════════════════════════════════════════
- *  IoT BLE Smart Glasses — Binary Protocol Parser & Builder
+ *  IoT BLE Smart Glasses — Protocol Parser & Builder
  * ════════════════════════════════════════════════════════════════
- *
- *  Packet Wire Format:
- *  ┌──────────┬──────┬──────────┬──────────────┬─────────┐
- *  │ SYNC (2B)│CMD(1)│ LEN (2B) │ PAYLOAD (NB) │ CRC (1B)│
- *  │ 0xAA 0x55│      │ LE u16   │              │  u8     │
- *  └──────────┴──────┴──────────┴──────────────┴─────────┘
- *
- *  CRC = (CMD + sum(PAYLOAD bytes)) & 0xFF
- *
- *  Design goals:
- *   - Never throw — return null on any invalid input
- *   - Handle fragmented, concatenated, and corrupted streams
- *   - Zero external dependencies
  */
 
 'use strict';
 
-// ── Sync Marker ────────────────────────────────────────────
-const SYNC = [0xAA, 0x55];
+const SYNC_A2D = [0xAB, 0x55];
+const SYNC_D2A = [0xAC, 0x55];
 
-// ── Sizes ──────────────────────────────────────────────────
-const HEADER_SIZE = 5;            // SYNC(2) + CMD(1) + LEN(2)
-const CRC_SIZE    = 1;
-const MIN_PACKET_SIZE = HEADER_SIZE + CRC_SIZE; // 6 bytes (empty payload)
+const HEADER_SIZE = 5; // SYNC(2) + CMD(1) + LEN(2)
+const CRC_SIZE = 1;
 
-// ── Command IDs ────────────────────────────────────────────
 const COMMANDS = Object.freeze({
-  PHOTO_CAPTURED : 0x01,
-  NOD_DETECTED   : 0x02,
-  BATTERY_LEVEL  : 0x03,
-  CHARGING_STATE : 0x04,
-  SET_LED        : 0x05,
-  TRIGGER_PHOTO  : 0x06,
-  SYNC_TIME      : 0x07,
-  ACK            : 0x08,
-  ERROR          : 0x09,
+  SET_LED: 0x01,
+  GET_BATTERY: 0x17, // Reply is 0x17 as well
+  TAKE_PHOTO: 0x22,
+  ACTION_SYNC: 0x45,
+  CHARGING_STATUS: 0x53,
+  SYNC_TIME: 0x59
 });
 
 const COMMAND_NAMES = Object.freeze(
   Object.fromEntries(Object.entries(COMMANDS).map(([k, v]) => [v, k]))
 );
 
-// ── CRC: (cmd + sum(data)) & 0xFF ─────────────────────────
 function computeCRC(cmd, data) {
   let sum = cmd;
   for (let i = 0; i < data.length; i++) sum += data[i];
   return sum & 0xFF;
 }
 
-// ── Packet Builder ─────────────────────────────────────────
-function buildPacket(cmd, data = []) {
+// buildPacket now takes direction to use the correct sync bytes
+function buildPacket(dir, cmd, data = []) {
   try {
+    if (dir !== 'a2d' && dir !== 'd2a') return null;
     if (cmd === undefined || cmd === null || typeof cmd !== 'number') return null;
     if (!Array.isArray(data)) return null;
-    if (data.length > 0xFFFF || cmd < 0 || cmd > 0xFF) return null;
+    
+    // length covers cmd (1) + data (N) + crc (1)
+    const len = 1 + data.length + 1;
+    if (len > 0xFFFF || cmd < 0 || cmd > 0xFF) return null;
 
-    const lenLo = data.length & 0xFF;
-    const lenHi = (data.length >> 8) & 0xFF;
+    // Big-endian length
+    const lenHi = (len >> 8) & 0xFF;
+    const lenLo = len & 0xFF;
+    
     const crc = computeCRC(cmd, data);
+    const sync = dir === 'a2d' ? SYNC_A2D : SYNC_D2A;
 
-    return new Uint8Array([...SYNC, cmd, lenLo, lenHi, ...data, crc]);
+    return new Uint8Array([...sync, cmd, lenHi, lenLo, ...data, crc]);
   } catch (_) { return null; }
 }
 
-// ── Single Packet Parser ───────────────────────────────────
 function parsePacket(raw) {
   try {
-    if (!raw || raw.length < MIN_PACKET_SIZE) return null;
-    if (raw[0] !== SYNC[0] || raw[1] !== SYNC[1]) return null;
+    if (!raw || raw.length < HEADER_SIZE + CRC_SIZE) return null;
+    
+    let dir;
+    if (raw[0] === SYNC_A2D[0] && raw[1] === SYNC_A2D[1]) dir = 'a2d';
+    else if (raw[0] === SYNC_D2A[0] && raw[1] === SYNC_D2A[1]) dir = 'd2a';
+    else return null;
 
     const cmd = raw[2];
-    const payloadLen = raw[3] | (raw[4] << 8);
-    const totalLen = HEADER_SIZE + payloadLen + CRC_SIZE;
+    // Big-endian length
+    const packetLen = (raw[3] << 8) | raw[4];
+    
+    // Total raw bytes = SYNC(2) + length(2) + packetLen(cmd+data+crc)
+    const totalLen = 4 + packetLen;
     if (raw.length < totalLen) return null;
 
-    const payload = Array.from(raw.slice(HEADER_SIZE, HEADER_SIZE + payloadLen));
-    const expected = computeCRC(cmd, payload);
-    const received = raw[HEADER_SIZE + payloadLen];
+    const payloadLen = packetLen - 2; // Subtract cmd and crc from packetLen
+    if (payloadLen < 0) return null;
 
-    if (expected !== received) return null;
+    const payload = Array.from(raw.slice(HEADER_SIZE, HEADER_SIZE + payloadLen));
+    const expectedCrc = computeCRC(cmd, payload);
+    const receivedCrc = raw[HEADER_SIZE + payloadLen];
+
+    if (expectedCrc !== receivedCrc) return null;
 
     return {
+      direction: dir,
       command: cmd,
       commandName: COMMAND_NAMES[cmd] || `UNKNOWN_0x${cmd.toString(16).padStart(2, '0').toUpperCase()}`,
       payload,
       payloadLength: payloadLen,
       rawLength: totalLen,
-      crc: received,
+      crc: receivedCrc,
       valid: true,
     };
   } catch (_) { return null; }
 }
 
-// ── Stream Parser (handles concatenated + garbage) ─────────
-function parseStream(data) {
-  const packets = [];
-  if (!data || data.length === 0) return packets;
-  try {
+// ── Streaming Buffer (Handles Fragmentation) ───────────────
+class StreamBuffer {
+  constructor() {
+    this.buffer = new Uint8Array(0);
+  }
+
+  // Push chunks arriving over BLE (e.g. 20 byte MTU chunks)
+  push(chunk) {
+    if (!chunk || chunk.length === 0) return [];
+    
+    const newBuf = new Uint8Array(this.buffer.length + chunk.length);
+    newBuf.set(this.buffer);
+    newBuf.set(chunk, this.buffer.length);
+    this.buffer = newBuf;
+
+    const packets = [];
     let offset = 0;
-    while (offset <= data.length - MIN_PACKET_SIZE) {
-      if (data[offset] !== SYNC[0] || (offset + 1 < data.length && data[offset + 1] !== SYNC[1])) {
+
+    while (offset <= this.buffer.length - (HEADER_SIZE + CRC_SIZE)) {
+      const isA2D = this.buffer[offset] === SYNC_A2D[0] && this.buffer[offset + 1] === SYNC_A2D[1];
+      const isD2A = this.buffer[offset] === SYNC_D2A[0] && this.buffer[offset + 1] === SYNC_D2A[1];
+      
+      if (!isA2D && !isD2A) {
         offset++;
         continue;
       }
-      const remaining = data.slice(offset);
+      
+      const packetLen = (this.buffer[offset + 3] << 8) | this.buffer[offset + 4];
+      const totalLen = 4 + packetLen;
+      
+      if (offset + totalLen > this.buffer.length) {
+        // Fragmented packet, wait for more chunks
+        break; 
+      }
+      
+      const remaining = this.buffer.slice(offset, offset + totalLen);
       const pkt = parsePacket(remaining);
+      
       if (pkt) {
-        pkt.offset = offset;
         packets.push(pkt);
-        offset += pkt.rawLength;
+        offset += totalLen;
       } else {
-        offset++;
+        // Corrupted packet (bad CRC or invalid format)
+        // Skip sync marker to allow re-syncing on next valid packet
+        offset++; 
       }
     }
-  } catch (_) {}
-  return packets;
+
+    // Keep only the unprocessed remainder
+    if (offset > 0) {
+      this.buffer = this.buffer.slice(offset);
+    }
+
+    return packets;
+  }
 }
 
-// ── Interpretation helpers ─────────────────────────────────
+function parseStream(data) {
+  const sb = new StreamBuffer();
+  return sb.push(data);
+}
+
 function interpretPacket(parsed) {
   if (!parsed) return 'Invalid packet';
   switch (parsed.command) {
-    case COMMANDS.PHOTO_CAPTURED: return `📷 Photo captured (ID: ${parsed.payload[0] ?? '?'})`;
-    case COMMANDS.NOD_DETECTED: {
-      const t = ['single', 'double', 'long'];
-      return `🤝 Nod: ${t[parsed.payload[0]] ?? 'unknown'}`;
-    }
-    case COMMANDS.BATTERY_LEVEL:  return `🔋 Battery: ${parsed.payload[0] ?? '?'}%`;
-    case COMMANDS.CHARGING_STATE: return `⚡ Charging: ${parsed.payload[0] ? 'ON' : 'OFF'}`;
-    case COMMANDS.SET_LED:        return `💡 LED → ${parsed.payload[0] ?? '?'}%`;
-    case COMMANDS.TRIGGER_PHOTO:  return `📸 Trigger photo capture`;
-    case COMMANDS.SYNC_TIME: {
-      if (parsed.payload.length >= 4) {
-        const ts = parsed.payload[0] | (parsed.payload[1] << 8) | (parsed.payload[2] << 16) | (parsed.payload[3] << 24);
-        return `🕐 Sync: ${new Date(ts * 1000).toLocaleTimeString()}`;
+    case COMMANDS.SET_LED:
+      if (parsed.payload[0] === 0x30) return '💡 Set LED: LOW';
+      if (parsed.payload[0] === 0x31) return '💡 Set LED: MEDIUM';
+      if (parsed.payload[0] === 0x32) return '💡 Set LED: HIGH';
+      return `💡 Set LED: Unknown`;
+    case COMMANDS.GET_BATTERY:
+      if (parsed.direction === 'd2a' && parsed.payload.length >= 2) {
+        return `🔋 Battery: ${parsed.payload[0]}%, Charging: ${parsed.payload[1] ? 'ON' : 'OFF'}`;
       }
-      return '🕐 Time sync';
-    }
-    case COMMANDS.ACK:   return `✅ ACK (cmd 0x${(parsed.payload[0]??0).toString(16).padStart(2,'0')})`;
-    case COMMANDS.ERROR: {
-      const c = { 1:'CRC_FAIL', 2:'UNKNOWN_CMD', 3:'TIMEOUT', 4:'BUSY' };
-      return `❌ ${c[parsed.payload[0]] ?? 'ERROR'}`;
-    }
-    default: return `CMD 0x${parsed.command.toString(16).padStart(2,'0')}`;
+      return '🔋 Get Battery Request';
+    case COMMANDS.TAKE_PHOTO:
+      if (parsed.payload[0] === 0x30) return '📷 Take Photo (Standard)';
+      if (parsed.payload[0] === 0x31) return '📷 Take Photo (HD Upload)';
+      return '📷 Take Photo';
+    case COMMANDS.ACTION_SYNC:
+      if (parsed.payload.length >= 9) {
+        return `⚡ Sync: Photo(${parsed.payload[0]}) Nod(${parsed.payload[5]}) Worn(${parsed.payload[8]})`;
+      }
+      return '⚡ Action Sync';
+    case COMMANDS.CHARGING_STATUS:
+      return `🔌 Charging: ${parsed.payload[0] ? 'ON' : 'OFF'} (${parsed.payload[1]}%)`;
+    case COMMANDS.SYNC_TIME:
+      if (parsed.payload.length >= 7) {
+        const p = parsed.payload;
+        const year = (p[0] << 8) | p[1];
+        return `🕐 Sync Time: ${year}-${String(p[2]).padStart(2,'0')}-${String(p[3]).padStart(2,'0')} ${String(p[4]).padStart(2,'0')}:${String(p[5]).padStart(2,'0')}:${String(p[6]).padStart(2,'0')}`;
+      }
+      return '🕐 Sync Time';
+    default: 
+      return `CMD 0x${parsed.command.toString(16).padStart(2,'0')}`;
   }
 }
 
@@ -156,8 +197,8 @@ function toHexString(bytes) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    SYNC, COMMANDS, COMMAND_NAMES,
-    HEADER_SIZE, CRC_SIZE, MIN_PACKET_SIZE,
+    SYNC_A2D, SYNC_D2A, COMMANDS, COMMAND_NAMES,
+    HEADER_SIZE, CRC_SIZE, StreamBuffer,
     computeCRC, buildPacket, parsePacket, parseStream,
     interpretPacket, toHexString,
   };
