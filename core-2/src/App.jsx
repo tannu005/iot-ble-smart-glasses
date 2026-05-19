@@ -42,12 +42,10 @@ function CustomCursor() {
   useEffect(() => {
     const handleMouseMove = (e) => {
       setPos({ x: e.clientX, y: e.clientY });
-      
       const target = e.target;
       const isClickable = target.tagName === 'BUTTON' || target.tagName === 'A' || target.closest('button') || target.tagName === 'INPUT';
       setIsHovering(isClickable);
     };
-    
     window.addEventListener('mousemove', handleMouseMove);
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
@@ -96,6 +94,7 @@ export default function App() {
   const [chaos, setChaos] = useState(false);
   const [autoSim, setAutoSim] = useState(false);
   const [ledVal, setLedVal] = useState(50);
+  const [flashActive, setFlashActive] = useState(false);
   
   const startTime = useRef(Date.now());
   const [uptime, setUptime] = useState('0s');
@@ -134,6 +133,11 @@ export default function App() {
   const popStat = useCallback((id) => {
     const el = document.getElementById(id);
     if (el) { el.classList.remove('up'); void el.offsetWidth; el.classList.add('up'); setTimeout(() => el.classList.remove('up'), 400); }
+  }, []);
+
+  const triggerCameraFlash = useCallback(() => {
+    setFlashActive(true);
+    setTimeout(() => setFlashActive(false), 50);
   }, []);
 
   // ── Transmit Core ────────────────────────────────────────────
@@ -199,6 +203,8 @@ export default function App() {
         break;
       }
       case COMMANDS.TAKE_PHOTO:
+        // App commanded device to take a photo. Device takes it.
+        triggerCameraFlash();
         setDevice(d => { 
           const next = { ...d, photoCount: d.photoCount + 1 };
           const syncPkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [1, 0, 0, 0, 0, 0, 0, 0, next.worn]);
@@ -218,15 +224,16 @@ export default function App() {
         break;
       default: break;
     }
-  }, [transmitOverAir, handleAppReceive, popStat]);
+  }, [transmitOverAir, handleAppReceive, popStat, triggerCameraFlash]);
 
   // ── UI Actions (Device side) ──────────────────────────────────────
   const devicePhoto = useCallback(() => {
+    triggerCameraFlash();
     setDevice(d => { const n = d.photoCount + 1; return { ...d, photoCount: n }; });
     popStat('stat-photo-val');
     const pkt = buildPacket('d2a', COMMANDS.ACTION_SYNC, [1, 0, 0, 0, 0, 0, 0, 0, device.worn]);
     transmitOverAir('d2a', pkt, handleAppReceive);
-  }, [device.worn, transmitOverAir, handleAppReceive, popStat]);
+  }, [device.worn, transmitOverAir, handleAppReceive, popStat, triggerCameraFlash]);
 
   const deviceNod = useCallback(() => {
     const nodType = 1 + Math.floor(Math.random() * 2); 
@@ -296,6 +303,7 @@ export default function App() {
 
   return (
     <>
+      <div className={`camera-flash ${flashActive ? 'active' : ''}`} />
       <CustomCursor />
       
       {/* Cinematic Masked Video Hero */}
@@ -311,11 +319,8 @@ export default function App() {
             <div className="header-title"><h1>BLE Smart Glasses</h1><span className="subtitle">Live Device Simulator</span></div>
           </div>
           
-          <div className="header-center">
-            <div className="conn-badge"><span className="pulse-dot" /><span className="conn-text">Connected</span></div>
-          </div>
-          
           <div className="header-right">
+            <div className="conn-badge" style={{marginRight: 10}}><span className="pulse-dot" /><span className="conn-text">Connected</span></div>
             <button className={`auto-sim-btn${autoSim ? ' active' : ''}`} onClick={() => setAutoSim(a => !a)} title="Generate random traffic">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
               Auto Simulate
@@ -353,7 +358,7 @@ export default function App() {
                 <button className="action-btn" onClick={(e) => { ripple(e); deviceCharge(); }}><span className="btn-icon">⚡</span> Toggle Charging</button>
               </div>
 
-              <div className="stats-grid" style={{marginTop: 'auto'}}>
+              <div className="stats-grid">
                 <div className="stat-card"><span className="stat-val" id="stat-photo-val">{device.photoCount}</span><span className="stat-lbl">Photos</span></div>
                 <div className="stat-card"><span className="stat-val" id="stat-nod-val">{device.nodCount}</span><span className="stat-lbl">Nods</span></div>
                 <div className="stat-card"><span className="stat-val" id="stat-led-val">{device.ledBrightness}%</span><span className="stat-lbl">LED</span></div>
@@ -396,10 +401,12 @@ export default function App() {
               ))}
             </div>
             <div className="log-footer">
-              <span className="log-stat"><span className="dot s" /> App Tx: <b>{stats.sent}</b></span>
-              <span className="log-stat"><span className="dot r" /> Dev Tx: <b>{stats.recv}</b></span>
-              <span className="log-stat" style={stats.errors > 0 ? {color: 'var(--rose)'} : {}}><span className="dot e" /> Err: <b>{stats.errors}</b></span>
-              <span className="log-stat" style={{marginLeft: 'auto'}}>Uptime: <b>{uptime}</b></span>
+              <div className="log-stats-wrap">
+                <span className="log-stat"><span className="dot s" /> App Tx: <b>{stats.sent}</b></span>
+                <span className="log-stat"><span className="dot r" /> Dev Tx: <b>{stats.recv}</b></span>
+                <span className="log-stat" style={stats.errors > 0 ? {color: 'var(--rose)'} : {}}><span className="dot e" /> Err: <b>{stats.errors}</b></span>
+              </div>
+              <span className="log-stat">Uptime: <b>{uptime}</b></span>
             </div>
           </section>
 
@@ -431,7 +438,7 @@ export default function App() {
                 <div className="group-label">Remote Controls</div>
                 
                 <div className="slider-ctl">
-                  <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 8}}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 12}}>
                     <label style={{marginBottom: 0}}>💡 LED Brightness</label>
                     <span className="slider-val">{ledVal}%</span>
                   </div>
@@ -451,7 +458,7 @@ export default function App() {
                 <button className="action-btn" onClick={(e) => { ripple(e); appSyncTime(); }}><span className="btn-icon">🕐</span> Sync Local Time</button>
               </div>
 
-              <div className="last-pkt">
+              <div className="last-pkt" style={{marginTop: 'auto'}}>
                 <div className="group-label">Last Packet Received</div>
                 <div className={`last-pkt-body${log.length ? ' hl' : ''}`}>
                   {log.length === 0 ? <span style={{ opacity: .5 }}>Awaiting data...</span>
