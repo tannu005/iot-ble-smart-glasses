@@ -59,21 +59,16 @@ function CustomCursor() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Cinematic Hero Component (Pure CSS Mesh)
+   Premium Minimalist Hero Component
    ═══════════════════════════════════════════════════════════════ */
-function CinematicHero() {
+function PremiumHero() {
   return (
     <div className="hero-container">
-      <div className="hero-video-wrapper"></div>
+      <div className="hero-bg-anim"></div>
       
       <div className="hero-content">
-        <div className="hero-title-layer">
-          <div className="hero-title-outline">GlassLink G1</div>
-          <div className="hero-title-solid">GlassLink G1</div>
-        </div>
-        <div className="hero-subtitle">
-          Next-Gen AI Wearable Simulator
-        </div>
+        <h1 className="hero-title">GlassLink G1</h1>
+        <p className="hero-subtitle">Next-Gen AI Wearable Simulator</p>
       </div>
       
       <div className="scroll-prompt">
@@ -307,8 +302,8 @@ export default function App() {
       <div className={`camera-flash ${flashActive ? 'active' : ''}`} />
       <CustomCursor />
       
-      {/* Cinematic Masked Video Hero */}
-      <CinematicHero />
+      {/* Premium Centered Hero */}
+      <PremiumHero />
 
       <div id="simulator-section">
         {/* ═══ Header ═══ */}
