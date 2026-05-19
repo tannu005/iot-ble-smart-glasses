@@ -1,0 +1,15 @@
+{
+  "name": "iot-ble-smart-glasses",
+  "version": "1.0.0",
+  "description": "IoT BLE Smart Glasses Companion App — Protocol parser, live device simulator, and voice intent classifier",
+  "scripts": {
+    "test:protocol": "cd core-1 && node --test protocol.test.js",
+    "test:classifier": "cd bonus && node test.js",
+    "test": "npm run test:protocol && npm run test:classifier",
+    "simulator": "cd core-2 && npx -y serve@latest -l 3000",
+    "start": "npm run simulator"
+  },
+  "keywords": ["iot", "ble", "smart-glasses", "protocol-parser", "simulator"],
+  "author": "",
+  "license": "MIT"
+}
