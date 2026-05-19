@@ -1,9 +1,4 @@
 # GlassLink G1 — Companion App & BLE Protocol Simulator
-
-This repository contains the full deliverable for the IoT BLE Smart Glasses assignment. It implements a robust, bidirectional binary communication protocol, a live React-based hardware simulator, and a Voice Intent Classifier (Option B).
-
-> **Important**: This project was built to address **100%** of the core requirements and positive evaluation signals, including streaming buffer reconstruction (MTU fragmentation), exact byte mappings, chaos engineering, and zero-dependency portability.
-
 ---
 
 ## 🚀 Quick Start
@@ -49,8 +44,6 @@ The simulator UI includes a toggleable **Chaos Mode** that randomly applies 10% 
 ---
 
 ## 🧠 Assumptions & Clarifications
-
-The assignment specification left intentional gaps. Here is how they were addressed:
 1. **Length Header Calculation**: The spec says length covers `cmd (1) + data (N) + CRC (1)`. I assumed this meant the 2-byte Length field literally stores the integer value of `N + 2`.
 2. **Byte Order**: The spec mentioned "Big-endian" for Length. I assumed all integer parsing is Big-Endian.
 3. **Missing Commands**: The spec mentioned `GET_BATTERY` (0x17) returns a reply. I assumed the device replies using the identical 0x17 command ID but reversed sync bytes (`0xAC 0x55`), and payload `[level, charging_status]`.
