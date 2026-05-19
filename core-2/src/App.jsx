@@ -43,7 +43,6 @@ function CustomCursor() {
     const handleMouseMove = (e) => {
       setPos({ x: e.clientX, y: e.clientY });
       
-      // Check if hovering over clickable elements
       const target = e.target;
       const isClickable = target.tagName === 'BUTTON' || target.tagName === 'A' || target.closest('button') || target.tagName === 'INPUT';
       setIsHovering(isClickable);
@@ -62,21 +61,12 @@ function CustomCursor() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Cinematic Hero Component
+   Cinematic Hero Component (Pure CSS Mesh)
    ═══════════════════════════════════════════════════════════════ */
 function CinematicHero() {
   return (
     <div className="hero-container">
-      <div className="hero-video-wrapper">
-        <video 
-          className="hero-video" 
-          autoPlay 
-          muted 
-          loop 
-          playsInline
-          src="https://cdn.pixabay.com/video/2021/08/04/83864-584742588_large.mp4"
-        />
-      </div>
+      <div className="hero-video-wrapper"></div>
       
       <div className="hero-content">
         <div className="hero-title-layer">
@@ -316,7 +306,7 @@ export default function App() {
         <header className="header">
           <div className="header-left">
             <div className="logo-icon">
-              <svg viewBox="0 0 32 32" width="22" height="22" fill="none"><rect x="2" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><rect x="20" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M12 14h8" stroke="currentColor" strokeWidth="2"/><circle cx="7" cy="14" r="2" fill="currentColor"/><circle cx="25" cy="14" r="2" fill="currentColor"/></svg>
+              <svg viewBox="0 0 32 32" width="24" height="24" fill="none"><rect x="2" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><rect x="20" y="10" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M12 14h8" stroke="currentColor" strokeWidth="2"/><circle cx="7" cy="14" r="2" fill="currentColor"/><circle cx="25" cy="14" r="2" fill="currentColor"/></svg>
             </div>
             <div className="header-title"><h1>BLE Smart Glasses</h1><span className="subtitle">Live Device Simulator</span></div>
           </div>
@@ -327,11 +317,11 @@ export default function App() {
           
           <div className="header-right">
             <button className={`auto-sim-btn${autoSim ? ' active' : ''}`} onClick={() => setAutoSim(a => !a)} title="Generate random traffic">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
               Auto Simulate
             </button>
             <button className={`chaos-btn${chaos ? ' active' : ''}`} onClick={() => setChaos(c => !c)} title="Corrupt 10% of packets randomly">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
               Chaos Mode
             </button>
           </div>
@@ -375,12 +365,12 @@ export default function App() {
           <section className="panel log-panel">
             <div className="panel-hdr">
               <div className="p-icon log">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
               </div>
               <h2>Packet Log</h2>
               <div className="log-controls">
                 <button className="icon-btn" onClick={() => { setLog([]); setStats({ sent: 0, recv: 0, errors: 0 }); }} title="Clear Log">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                 </button>
               </div>
             </div>
@@ -475,7 +465,7 @@ export default function App() {
                                 </span>
                                 {last.parsed.commandName}
                               </div>
-                              <div style={{ color: 'var(--text-3)', fontSize: '.7rem', wordBreak: 'break-all' }}>
+                              <div style={{ color: 'var(--text-3)', fontSize: '.75rem', wordBreak: 'break-all' }}>
                                 {toHexString(last.raw).substring(0, 40)}{last.raw.length > 13 ? '...' : ''}
                               </div>
                             </div>
